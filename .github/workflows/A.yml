@@ -1,0 +1,68 @@
+name: ErfanGSIs-build
+
+on: 
+  workflow_dispatch:
+    inputs:
+      ROM_URL:
+        description: 'ROM_URL'
+        required: true
+      ROM_TYPE:
+        description: 'ROM_TYPE'
+        required: true
+      RELEASE_NAME:
+        description: 'RELEASE_NAME'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    if: github.event.repository.owner.id == github.event.sender.id
+
+    steps:
+       - name: Checkout
+         uses: actions/checkout@master
+           
+       - name: Initialization environment
+         run: |
+            sudo -E apt-get -qq update
+            sudo -E apt-get -qq install -y git wget python3-pip
+       
+       - name: Clone ErfanGSI Source Code
+         run: | 
+            git clone --recurse-submodules https://github.com/VegaBobo/ErfanGSIs.git ErfanGSIs
+         
+       - name: Fix exit (prevent early termination)
+         run: |
+              sed -i 's/\|\| exit 1//g' ErfanGSIs/url2GSI.sh
+              sed -i 's/exit 1//g' ErfanGSIs/url2GSI.sh
+       
+       - name: Clean up possible stale mount point
+         run: |
+              # 如果之前有残留的挂载点，强制卸载（避免干扰）
+              sudo umount -l ErfanGSIs/working/system 2>/dev/null || true
+              sudo rm -rf ErfanGSIs/working
+       
+       - name: Download Stock Rom and Build A-Only GSI
+         run: |
+              cd ErfanGSIs
+              mkdir -p ./output
+              # 切换工作目录到根，防止后续 umount 失败
+              cd /
+              # 使用绝对路径执行脚本，并捕获输出
+              sudo bash /home/runner/work/ErfanGSIs-build/ErfanGSIs-build/ErfanGSIs/url2GSI.sh -c --aonly "${{ github.event.inputs.ROM_URL }}" "${{ github.event.inputs.ROM_TYPE }}"
+       
+       - name: Pack GSI
+         run: |
+              # 打包 output 目录下的所有 .img 文件为 GSI.tar.gz
+              cd ErfanGSIs/output
+              tar -czvf GSI.tar.gz *.img
+              # 将压缩包移动到上级目录方便上传
+              mv GSI.tar.gz ../
+       
+       - name: Upload GSI to Release
+         uses: ncipollo/release-action@v1.8.6
+         with:
+           artifacts: ErfanGSIs/output/*.img,ErfanGSIs/GSI.tar.gz
+           name: "${{ github.event.inputs.RELEASE_NAME }}"
+           tag: "${{ github.event.inputs.RELEASE_NAME }}"
+           token: ${{ secrets.GITHUB_TOKEN }}
