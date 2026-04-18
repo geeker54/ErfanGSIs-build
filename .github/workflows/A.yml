@@ -39,7 +39,6 @@ jobs:
        - name: 设置脚本可执行权限
          run: |
             cd ErfanGSIs
-            chmod +x tools/sdat2img.py
             chmod +x url2GSI.sh
 
        - name: 安装 Python 依赖
