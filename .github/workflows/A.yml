@@ -38,7 +38,6 @@ jobs:
               mkdir -p ./output
               # 跳过不兼容的 pycrypto 安装
               sed -i 's/pip install pycrypto//g' setup.sh
-              bash setup.sh
               # 确保挂载相关工具可用
               sudo apt-get install -y android-sdk-libsparse-utils e2fsprogs
 
