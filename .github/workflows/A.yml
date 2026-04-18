@@ -1,4 +1,4 @@
-name: ErfanGSIs-build
+name: ErfanGSIs-build-Aonly
 
 on:
   workflow_dispatch:
@@ -28,18 +28,23 @@ jobs:
             sudo apt-get -qq update
             sudo apt-get -qq install -y git wget python3-pip brotli android-sdk-libsparse-utils e2fsprogs xz-utils
 
-       # 使用更活跃的修复版 ErfanGSIs 仓库
+       # 核心修复：使用 actions/checkout 克隆公开仓库，避免身份验证问题
        - name: 克隆 ErfanGSIs 工具（ponces 维护版）
+         uses: actions/checkout@v3
+         with:
+           repository: ponces/ErfanGSIs
+           path: ErfanGSIs
+           submodules: recursive
+
+       - name: 设置脚本可执行权限
          run: |
-            git clone --recurse-submodules https://github.com/ponces/ErfanGSIs.git ErfanGSIs
             cd ErfanGSIs
-            # 确保 sdat2img 可执行
             chmod +x tools/sdat2img.py
+            chmod +x url2GSI.sh
 
        - name: 安装 Python 依赖
          run: |
             cd ErfanGSIs
-            # 跳过可能冲突的 pycrypto，安装必要模块
             sed -i 's/pip install pycrypto//g' setup.sh
             bash setup.sh
             pip3 install --user protobuf
@@ -53,10 +58,7 @@ jobs:
          run: |
             cd ErfanGSIs
             ROM_URL="${{ github.event.inputs.ROM_URL }}"
-            ROM_TYPE="${{ github.event.inputs.ROM_TYPE }}"
-            echo "开始构建，ROM类型：$ROM_TYPE"
-            
-            # 直接使用 Generic 模式，它对 Brotli 压缩的 MIUI 包兼容性最好
+            echo "开始构建，使用 Generic 模式处理 ROM"
             sudo bash ./url2GSI.sh "$ROM_URL" Generic aonly
 
        - name: 检查生成结果并打包
