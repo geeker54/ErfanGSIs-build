@@ -1,13 +1,13 @@
-name: ErfanGSIs-build
+name: ErfanGSIs-build-Aonly
 
 on:
   workflow_dispatch:
     inputs:
       ROM_URL:
-        description: 'ROM直链下载地址'
+        description: 'ROM直链下载地址（支持.zip/.tgz/.tar）'
         required: true
       ROM_TYPE:
-        description: 'ROM类型（MIUI/Generic等）'
+        description: 'ROM类型（仅用于命名，实际使用Generic）'
         required: true
         default: 'Generic'
       RELEASE_NAME:
@@ -26,10 +26,10 @@ jobs:
        - name: 初始化环境与依赖
          run: |
             sudo apt-get -qq update
-            sudo apt-get -qq install -y git wget python3-pip brotli android-sdk-libsparse-utils e2fsprogs xz-utils
+            sudo apt-get -qq install -y git wget python3-pip brotli android-sdk-libsparse-utils e2fsprogs xz-utils unzip p7zip-full
 
-       # 核心修复：使用 actions/checkout 克隆公开仓库，避免身份验证问题
-       - name: 克隆 ErfanGSIs 工具（ponces 维护版）
+       # 克隆 ErfanGSIs 工具（使用原版或修复版均可，因为我们只用到它的 GSI 生成部分）
+       - name: 克隆 ErfanGSIs 工具
          uses: actions/checkout@v3
          with:
            repository: erfanoabdi/ErfanGSIs
@@ -45,19 +45,90 @@ jobs:
          run: |
             cd ErfanGSIs
             sed -i 's/pip install pycrypto//g' setup.sh
+            bash setup.sh
             pip3 install --user protobuf
+
+       - name: 下载 ROM 并提取 system.img
+         run: |
+            mkdir -p rom_temp
+            cd rom_temp
+
+            ROM_URL="${{ github.event.inputs.ROM_URL }}"
+            echo "正在下载 ROM: $ROM_URL"
+            wget -q --show-progress -O rom_package "$ROM_URL" || curl -L -o rom_package "$ROM_URL"
+
+            # 判断文件类型并解压/提取 system.img
+            FILENAME=$(basename "$ROM_URL")
+            EXT="${FILENAME##*.}"
+            echo "文件扩展名: $EXT"
+
+            # 如果下载的是 .img 文件（比如已经是 system.img），直接使用
+            if [[ "$FILENAME" == *.img ]]; then
+                echo "检测到单个镜像文件，直接使用"
+                cp rom_package ../ErfanGSIs/input/system.img
+                exit 0
+            fi
+
+            # 解压处理
+            mkdir -p extracted
+            case "$EXT" in
+                zip)
+                    unzip -q rom_package -d extracted
+                    ;;
+                tgz|gz)
+                    tar -xzf rom_package -C extracted
+                    ;;
+                tar)
+                    tar -xf rom_package -C extracted
+                    ;;
+                7z)
+                    7z x rom_package -oextracted
+                    ;;
+                *)
+                    echo "未知压缩格式，尝试用 unzip 解压"
+                    unzip -q rom_package -d extracted || tar -xf rom_package -C extracted
+                    ;;
+            esac
+
+            # 在解压后的文件中查找 system.img
+            SYSTEM_IMG=$(find extracted -type f -name "system.img" | head -n 1)
+            if [ -z "$SYSTEM_IMG" ]; then
+                # 如果没有直接的 system.img，检查是否有 system.new.dat.br / system.new.dat
+                SYSTEM_BR=$(find extracted -type f -name "system.new.dat.br" | head -n 1)
+                if [ -n "$SYSTEM_BR" ]; then
+                    echo "发现 system.new.dat.br，正在转换为 system.img"
+                    brotli -d "$SYSTEM_BR" -o extracted/system.new.dat
+                    # 需要 system.transfer.list
+                    TRANSFER_LIST=$(find extracted -type f -name "system.transfer.list" | head -n 1)
+                    if [ -z "$TRANSFER_LIST" ]; then
+                        echo "错误：缺少 system.transfer.list 文件"
+                        exit 1
+                    fi
+                    python3 ../ErfanGSIs/tools/sdat2img.py "$TRANSFER_LIST" extracted/system.new.dat extracted/system.img
+                    SYSTEM_IMG="extracted/system.img"
+                else
+                    echo "错误：在 ROM 包中未找到 system.img 或 system.new.dat.br"
+                    exit 1
+                fi
+            fi
+
+            echo "找到 system.img: $SYSTEM_IMG"
+            # 复制到 ErfanGSIs 的 input 目录
+            mkdir -p ../ErfanGSIs/input
+            cp "$SYSTEM_IMG" ../ErfanGSIs/input/system.img
+            echo "system.img 已准备好，位于 ErfanGSIs/input/system.img"
 
        - name: 清理残留挂载点
          run: |
             sudo umount -l ErfanGSIs/working/system 2>/dev/null || true
             sudo rm -rf ErfanGSIs/working ErfanGSIs/tmp ErfanGSIs/output
 
-       - name: 构建 GSI（使用 Generic 模式）
+       - name: 构建 GSI（使用提取的 system.img）
          run: |
             cd ErfanGSIs
-            ROM_URL="${{ github.event.inputs.ROM_URL }}"
-            echo "开始构建，使用 Generic 模式处理 ROM"
-            sudo bash ./url2GSI.sh "$ROM_URL" Generic aonly
+            # 使用 --img 模式，直接传入本地 system.img
+            # 注意：url2GSI.sh 的第一个参数可以是本地文件路径
+            sudo bash ./url2GSI.sh ./input/system.img Generic aonly
 
        - name: 检查生成结果并打包
          run: |
