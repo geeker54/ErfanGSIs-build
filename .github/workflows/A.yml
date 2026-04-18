@@ -32,7 +32,7 @@ jobs:
        - name: 克隆 ErfanGSIs 工具（ponces 维护版）
          uses: actions/checkout@v3
          with:
-           repository: ponces/ErfanGSIs
+           repository: erfanoabdi/ErfanGSIs
            path: ErfanGSIs
            submodules: recursive
 
