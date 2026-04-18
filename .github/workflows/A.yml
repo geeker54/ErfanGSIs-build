@@ -45,7 +45,6 @@ jobs:
          run: |
             cd ErfanGSIs
             sed -i 's/pip install pycrypto//g' setup.sh
-            bash setup.sh
             pip3 install --user protobuf
 
        - name: 清理残留挂载点
