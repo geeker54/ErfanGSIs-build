@@ -1,16 +1,17 @@
-name: ErfanGSIs-build
+name: ErfanGSIs-build-Aonly
 
 on:
   workflow_dispatch:
     inputs:
       ROM_URL:
-        description: 'ROM_URL'
+        description: 'ROM直链下载地址'
         required: true
       ROM_TYPE:
-        description: 'ROM_TYPE'
+        description: 'ROM类型（MIUI/Generic等）'
         required: true
+        default: 'Generic'
       RELEASE_NAME:
-        description: 'RELEASE_NAME'
+        description: '发布名称'
         required: true
 
 jobs:
@@ -20,59 +21,57 @@ jobs:
 
     steps:
        - name: Checkout
-         uses: actions/checkout@master
+         uses: actions/checkout@v3
 
-       - name: Initialization environment
+       - name: 初始化环境与依赖
          run: |
-            sudo -E apt-get -qq update
-            sudo -E apt-get -qq install -y git wget python3-pip
+            sudo apt-get -qq update
+            sudo apt-get -qq install -y git wget python3-pip brotli android-sdk-libsparse-utils e2fsprogs xz-utils
 
-       # 核心修复1：使用最新、最活跃的原始仓库
-       - name: Clone ErfanGSI Source Code
+       # 使用更活跃的修复版 ErfanGSIs 仓库
+       - name: 克隆 ErfanGSIs 工具（ponces 维护版）
          run: |
-            git clone --recurse-submodules https://github.com/erfanoabdi/ErfanGSIs.git ErfanGSIs
+            git clone --recurse-submodules https://github.com/ponces/ErfanGSIs.git ErfanGSIs
+            cd ErfanGSIs
+            # 确保 sdat2img 可执行
+            chmod +x tools/sdat2img.py
 
-       - name: Setting up requirements
+       - name: 安装 Python 依赖
          run: |
-              cd ErfanGSIs
-              mkdir -p ./output
-              # 跳过不兼容的 pycrypto 安装
-              sed -i 's/pip install pycrypto//g' setup.sh
-              # 确保挂载相关工具可用
-              sudo apt-get install -y android-sdk-libsparse-utils e2fsprogs
+            cd ErfanGSIs
+            # 跳过可能冲突的 pycrypto，安装必要模块
+            sed -i 's/pip install pycrypto//g' setup.sh
+            bash setup.sh
+            pip3 install --user protobuf
 
-       # 核心修复2：处理固件支持，构建前先强制清理残留挂载点
-       - name: Build GSI with Retry Logic
+       - name: 清理残留挂载点
          run: |
-              cd ErfanGSIs
-              # 强制清理可能残留的挂载点，避免干扰
-              sudo umount -l working/system 2>/dev/null || true
-              sudo rm -rf working
+            sudo umount -l ErfanGSIs/working/system 2>/dev/null || true
+            sudo rm -rf ErfanGSIs/working ErfanGSIs/tmp ErfanGSIs/output
 
-              # 尝试使用 Generic 模式构建
-              ROM_URL="${{ github.event.inputs.ROM_URL }}"
-              ROM_TYPE="${{ github.event.inputs.ROM_TYPE }}"
-              
-              # 先尝试指定的ROM_TYPE
-              if ! sudo bash ./url2GSI.sh "$ROM_URL" "$ROM_TYPE" aonly; then
-                echo "指定类型构建失败，尝试使用 Generic 模式..."
-                # 如果失败，回退到 Generic 模式（适用于大多数Android 10+设备）
-                sudo bash ./url2GSI.sh "$ROM_URL" Generic aonly
-              fi
-
-       - name: Pack GSI
+       - name: 构建 GSI（使用 Generic 模式）
          run: |
-              # 检查并打包生成的镜像
-              cd ErfanGSIs/output
-              if ls *.img 1> /dev/null 2>&1; then
-                tar -czvf GSI.tar.gz *.img
-                echo "GSI打包成功"
-              else
-                echo "未找到生成的GSI镜像文件，构建可能失败"
-                exit 1
-              fi
+            cd ErfanGSIs
+            ROM_URL="${{ github.event.inputs.ROM_URL }}"
+            ROM_TYPE="${{ github.event.inputs.ROM_TYPE }}"
+            echo "开始构建，ROM类型：$ROM_TYPE"
+            
+            # 直接使用 Generic 模式，它对 Brotli 压缩的 MIUI 包兼容性最好
+            sudo bash ./url2GSI.sh "$ROM_URL" Generic aonly
 
-       - name: Upload GSI
+       - name: 检查生成结果并打包
+         run: |
+            cd ErfanGSIs/output
+            if ls *.img 1> /dev/null 2>&1; then
+              echo "✅ GSI 镜像生成成功："
+              ls -lh *.img
+              tar -czvf GSI.tar.gz *.img
+            else
+              echo "❌ 未找到生成的 GSI 镜像，构建失败"
+              exit 1
+            fi
+
+       - name: 上传发布
          uses: ncipollo/release-action@v1.8.6
          with:
            artifacts: ErfanGSIs/output/*.img,ErfanGSIs/output/GSI.tar.gz
